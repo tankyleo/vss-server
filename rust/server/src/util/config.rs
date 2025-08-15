@@ -22,7 +22,7 @@ pub(crate) struct PostgreSQLConfig {
 }
 
 impl PostgreSQLConfig {
-	pub(crate) fn to_connection_string(&self) -> String {
+	pub(crate) fn to_postgresql_endpoint(&self) -> String {
 		let username_env = std::env::var("VSS_POSTGRESQL_USERNAME");
 		let username = username_env.as_ref()
 			.ok()
@@ -35,8 +35,8 @@ impl PostgreSQLConfig {
 			.expect("PostgreSQL database password must be provided in config or env var VSS_POSTGRESQL_PASSWORD must be set.");
 
 		format!(
-			"postgresql://{}:{}@{}:{}/{}",
-			username, password, self.host, self.port, self.database
+			"postgresql://{}:{}@{}:{}",
+			username, password, self.host, self.port
 		)
 	}
 }
