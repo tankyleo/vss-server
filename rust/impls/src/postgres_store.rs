@@ -31,6 +31,7 @@ const DB_VERSION_COLUMN: &str = "db_version";
 
 const CHECK_DB_STMT: &str = "SELECT 1 FROM pg_database WHERE datname = $1";
 const INIT_DB_CMD: &str = "CREATE DATABASE";
+const CHECK_VERSION_TABLE_STMT: &str = "SELECT to_regclass('public.vss_db_version')::oid;";
 const GET_VERSION_STMT: &str = "SELECT db_version FROM vss_db_version;";
 const UPDATE_VERSION_STMT: &str = "UPDATE vss_db_version SET db_version=$1;";
 const LOG_MIGRATION_STMT: &str = "INSERT INTO vss_db_upgrades VALUES($1);";
@@ -126,18 +127,20 @@ impl PostgresBackendImpl {
 			.await
 			.map_err(|e| Error::new(ErrorKind::Other, format!("Connection error: {}", e)))?;
 
-		// Get the next migration to be applied, if there is no version table, start at migration 0
-		let migration_start = if let Ok(row) = conn.query_one(GET_VERSION_STMT, &[]).await {
+		let tx = conn
+			.transaction()
+			.await
+			.map_err(|e| Error::new(ErrorKind::Other, format!("Transaction start error: {}", e)))?;
+
+		let row = tx.query_one(CHECK_VERSION_TABLE_STMT, &[]).await.map_err(|e| Error::new(ErrorKind::Other, format!("Failed to query existence of version table: {}", e)))?;
+
+		let migration_start = if let Some(_oid) = row.get::<&str, Option<u32>>("to_regclass") {
+			let row = tx.query_one(GET_VERSION_STMT, &[]).await.unwrap();
 			let i: i32 = row.get(DB_VERSION_COLUMN);
 			usize::try_from(i).unwrap()
 		} else {
 			0
 		};
-
-		let tx = conn
-			.transaction()
-			.await
-			.map_err(|e| Error::new(ErrorKind::Other, format!("Transaction start error: {}", e)))?;
 
 		if migration_start == MIGRATIONS.len() {
 			// No migrations needed, we are done
