@@ -81,7 +81,7 @@ fn main() {
 			let authorizer = match JWTAuthorizer::new(pem.as_str()).await {
 				Ok(auth) => auth,
 				Err(e) => {
-					println!("Failed to parse the PEM formatted RSA public key: {}", e);
+					println!("Failed to configure JWT authorizer: {}", e);
 					std::process::exit(-1);
 				},
 			};
