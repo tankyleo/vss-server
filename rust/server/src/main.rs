@@ -21,7 +21,7 @@ use hyper_util::rt::TokioIo;
 use api::auth::{Authorizer, NoopAuthorizer};
 use api::kv_store::KvStore;
 use auth_impls::JWTAuthorizer;
-use impls::postgres_store::{Certificate, PostgresPlaintextBackend, PostgresTlsBackend};
+use impls::postgres_store::{PostgresPlaintextBackend, PostgresTlsBackend};
 use util::config::{Config, ServerConfig};
 use vss_service::VssService;
 
@@ -97,16 +97,10 @@ fn main() {
 		let endpoint = postgresql_config.to_postgresql_endpoint();
 		let db_name = postgresql_config.database;
 		let store: Arc<dyn KvStore> = if let Some(tls_config) = postgresql_config.tls {
-			let additional_certificate =
-				tls_config.crt_pem.map(|pem| match Certificate::from_pem(pem.as_bytes()) {
-					Ok(cert) => cert,
-					Err(e) => {
-						println!("Failed to parse the PEM formatted certificate: {}", e);
-						std::process::exit(-1);
-					},
-				});
 			let postgres_tls_backend =
-				match PostgresTlsBackend::new(&endpoint, &db_name, additional_certificate).await {
+				match PostgresTlsBackend::new(&endpoint, &db_name, tls_config.crt_pem.as_deref())
+					.await
+				{
 					Ok(backend) => backend,
 					Err(e) => {
 						println!("Failed to start postgres tls backend: {}", e);
