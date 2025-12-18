@@ -76,7 +76,7 @@ fn main() {
 				std::process::exit(-1);
 			},
 		};
-		let rsa_pem = rsa_pem_env.or(jwt_auth_config.map(|config| config.rsa_pem));
+		let rsa_pem = rsa_pem_env.or(jwt_auth_config.and_then(|config| config.rsa_pem));
 		let authorizer: Arc<dyn Authorizer> = if let Some(pem) = rsa_pem {
 			let authorizer = match JWTAuthorizer::new(pem.as_str()).await {
 				Ok(auth) => auth,
