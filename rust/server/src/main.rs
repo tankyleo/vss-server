@@ -28,15 +28,12 @@ mod vss_service;
 
 fn main() {
 	let args: Vec<String> = std::env::args().collect();
-	if args.len() != 2 {
-		eprintln!("Usage: {} <config-file-path>", args[0]);
-		std::process::exit(1);
-	}
 
-	let config = util::config::load_configuration(&args[1]).unwrap_or_else(|e| {
-		eprintln!("Failed to load configuration: {}", e);
-		std::process::exit(-1);
-	});
+	let config =
+		util::config::load_configuration(args.get(1).map(|s| s.as_str())).unwrap_or_else(|e| {
+			eprintln!("Failed to load configuration: {}", e);
+			std::process::exit(-1);
+		});
 
 	let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
 		Ok(runtime) => Arc::new(runtime),

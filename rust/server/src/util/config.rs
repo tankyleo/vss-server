@@ -1,16 +1,16 @@
 use serde::Deserialize;
 use std::net::SocketAddr;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Config {
-	server_config: ServerConfig,
+	server_config: Option<ServerConfig>,
 	jwt_auth_config: Option<JwtAuthConfig>,
 	postgresql_config: Option<PostgreSQLConfig>,
 }
 
 #[derive(Deserialize)]
 struct ServerConfig {
-	bind_address: SocketAddr,
+	bind_address: Option<SocketAddr>,
 }
 
 #[derive(Deserialize)]
@@ -18,6 +18,7 @@ struct JwtAuthConfig {
 	rsa_pem: Option<String>,
 }
 
+const BIND_ADDR_VAR: &str = "VSS_BIND_ADDRESS";
 const JWT_RSA_PEM_VAR: &str = "VSS_JWT_RSA_PEM";
 const PSQL_USER_VAR: &str = "VSS_PSQL_USERNAME";
 const PSQL_PASS_VAR: &str = "VSS_PSQL_PASSWORD";
@@ -51,12 +52,19 @@ pub(crate) struct Configuration {
 	pub(crate) tls_config: Option<Option<String>>,
 }
 
-pub(crate) fn load_configuration(config_file_path: &str) -> Result<Configuration, String> {
-	let config_file = std::fs::read_to_string(config_file_path)
-		.map_err(|e| format!("Failed to read configuration file: {}", e))?;
-	let Config { server_config: ServerConfig { bind_address }, jwt_auth_config, postgresql_config } =
+pub(crate) fn load_configuration(config_file_path: Option<&str>) -> Result<Configuration, String> {
+	let Config { server_config, jwt_auth_config, postgresql_config } = if config_file_path.is_some()
+		&& std::fs::exists(config_file_path.expect("config file path is some"))
+			.map_err(|e| format!("Failed to check presence of configuration file: {}", e))?
+	{
+		let config_file =
+			std::fs::read_to_string(config_file_path.expect("config file path is some"))
+				.map_err(|e| format!("Failed to read configuration file: {}", e))?;
 		toml::from_str(&config_file)
-			.map_err(|e| format!("Failed to parse configuration file: {}", e))?;
+			.map_err(|e| format!("Failed to parse configuration file: {}", e))?
+	} else {
+		Config::default() // All fields are set to `None`
+	};
 
 	macro_rules! read_env {
 		($env_var:expr) => {
@@ -81,6 +89,20 @@ pub(crate) fn load_configuration(config_file_path: &str) -> Result<Configuration
 			))?
 		};
 	}
+
+	let bind_address_env = read_env!(BIND_ADDR_VAR)
+		.map(|addr| {
+			addr.parse().map_err(|e| {
+				format!("Unable to parse the bind address environment variable: {}", e)
+			})
+		})
+		.transpose()?;
+	let bind_address = read_config!(
+		bind_address_env,
+		server_config.and_then(|c| c.bind_address),
+		"VSS server bind address",
+		BIND_ADDR_VAR
+	);
 
 	let rsa_pem_env = read_env!(JWT_RSA_PEM_VAR);
 	let rsa_pem = rsa_pem_env.or(jwt_auth_config.and_then(|config| config.rsa_pem));
