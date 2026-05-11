@@ -126,11 +126,12 @@ fn main() {
 		});
 
 		let store: Arc<dyn KvStore> = if let Some(crt_pem) = config.tls_config {
-			let postgres_tls_backend = PostgresTlsBackend::new(
+			let postgres_tls_backend = PostgresTlsBackend::new_with_max_user_storage_bytes(
 				&config.postgresql_prefix,
 				&config.default_db,
 				&config.vss_db,
 				crt_pem.as_deref(),
+				config.max_user_storage_bytes,
 			)
 			.await
 			.unwrap_or_else(|e| {
@@ -143,10 +144,11 @@ fn main() {
 			);
 			Arc::new(postgres_tls_backend)
 		} else {
-			let postgres_plaintext_backend = PostgresPlaintextBackend::new(
+			let postgres_plaintext_backend = PostgresPlaintextBackend::new_with_max_user_storage_bytes(
 				&config.postgresql_prefix,
 				&config.default_db,
 				&config.vss_db,
+				config.max_user_storage_bytes,
 			)
 			.await
 			.unwrap_or_else(|e| {

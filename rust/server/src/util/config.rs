@@ -1,9 +1,11 @@
+use impls::postgres_store::DEFAULT_MAX_USER_STORAGE_BYTES;
 use log::LevelFilter;
 use serde::Deserialize;
 use std::path::PathBuf;
 
 const BIND_ADDR_VAR: &str = "VSS_BIND_ADDRESS";
 const MAX_REQUEST_BODY_SIZE_VAR: &str = "VSS_MAX_REQUEST_BODY_SIZE";
+const MAX_USER_STORAGE_BYTES_VAR: &str = "VSS_MAX_USER_STORAGE_BYTES";
 const LOG_FILE_VAR: &str = "VSS_LOG_FILE";
 const LOG_LEVEL_VAR: &str = "VSS_LOG_LEVEL";
 const JWT_RSA_PEM_VAR: &str = "VSS_JWT_RSA_PEM";
@@ -29,6 +31,7 @@ struct TomlConfig {
 struct ServerConfig {
 	bind_address: Option<String>,
 	max_request_body_size: Option<usize>,
+	max_user_storage_bytes: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +64,7 @@ struct LogConfig {
 pub(crate) struct Configuration {
 	pub(crate) bind_address: String,
 	pub(crate) max_request_body_size: Option<usize>,
+	pub(crate) max_user_storage_bytes: i64,
 	pub(crate) rsa_pem: Option<String>,
 	pub(crate) postgresql_prefix: String,
 	pub(crate) default_db: String,
@@ -101,9 +105,16 @@ pub(crate) fn load_configuration(config_file_path: Option<&str>) -> Result<Confi
 			None => TomlConfig::default(), // All fields are set to `None`
 		};
 
-	let (bind_address_config, max_request_body_size_config) = match server_config {
-		Some(c) => (c.bind_address, c.max_request_body_size),
-		None => (None, None),
+	let (bind_address_config, max_request_body_size_config, max_user_storage_bytes_config) =
+		match server_config {
+			Some(c) => (c.bind_address, c.max_request_body_size, c.max_user_storage_bytes),
+			None => (None, None, None),
+		};
+
+	if let Some(max_user_storage_bytes) = max_user_storage_bytes_config {
+		if max_user_storage_bytes < 0 {
+			return Err("Maximum user storage bytes cannot be negative".to_string());
+		}
 	};
 
 	let bind_address_env = read_env(BIND_ADDR_VAR)?;
@@ -122,6 +133,25 @@ pub(crate) fn load_configuration(config_file_path: Option<&str>) -> Result<Confi
 		})
 		.transpose()?;
 	let max_request_body_size = max_request_body_size_env.or(max_request_body_size_config);
+
+	let max_user_storage_bytes_env = read_env(MAX_USER_STORAGE_BYTES_VAR)?
+		.map(|max_bytes| {
+			max_bytes.parse::<i64>().map_err(|e| {
+				format!(
+					"Unable to parse the maximum user storage bytes environment variable: {}",
+					e
+				)
+			})
+		})
+		.transpose()?;
+	if let Some(max_user_storage_bytes) = max_user_storage_bytes_env {
+		if max_user_storage_bytes < 0 {
+			return Err("Maximum user storage bytes cannot be negative".to_string());
+		}
+	}
+	let max_user_storage_bytes = max_user_storage_bytes_env
+		.or(max_user_storage_bytes_config)
+		.unwrap_or(DEFAULT_MAX_USER_STORAGE_BYTES);
 
 	let log_level_env: Option<LevelFilter> = read_env(LOG_LEVEL_VAR)?
 		.map(|level_str| {
@@ -204,6 +234,7 @@ pub(crate) fn load_configuration(config_file_path: Option<&str>) -> Result<Confi
 	Ok(Configuration {
 		bind_address,
 		max_request_body_size,
+		max_user_storage_bytes,
 		log_file,
 		log_level,
 		rsa_pem,

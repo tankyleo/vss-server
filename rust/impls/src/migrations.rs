@@ -37,6 +37,19 @@ pub(crate) const MIGRATIONS: &[&str] = &[
 	"ALTER TABLE vss_db DROP CONSTRAINT IF EXISTS vss_db_store_id_check;",
 	"ALTER TABLE vss_db ADD COLUMN IF NOT EXISTS sort_order BIGSERIAL NOT NULL UNIQUE;",
 	"CREATE INDEX IF NOT EXISTS idx_vss_db_sort_order ON vss_db (user_token, store_id, sort_order DESC) INCLUDE (key, version);",
+	"ALTER TABLE vss_db ADD COLUMN IF NOT EXISTS value_size bigint GENERATED ALWAYS AS (COALESCE(octet_length(value), 0)::bigint) STORED;",
+	"ALTER TABLE vss_db DROP CONSTRAINT IF EXISTS vss_db_value_size_check;",
+	"ALTER TABLE vss_db ADD CONSTRAINT vss_db_value_size_check CHECK (value_size >= 0);",
+	"CREATE TABLE IF NOT EXISTS vss_user_storage_usage (
+	    user_token character varying(120) PRIMARY KEY CHECK (user_token <> ''),
+	    total_value_bytes bigint NOT NULL CHECK (total_value_bytes >= 0)
+	);",
+	"INSERT INTO vss_user_storage_usage (user_token, total_value_bytes)
+	    SELECT user_token, COALESCE(SUM(value_size), 0)::bigint
+	    FROM vss_db
+	    GROUP BY user_token
+	    ON CONFLICT (user_token) DO UPDATE
+	    SET total_value_bytes = EXCLUDED.total_value_bytes;",
 ];
 #[cfg(test)]
 pub(crate) const DUMMY_MIGRATION: &str = "SELECT 1 WHERE FALSE;";

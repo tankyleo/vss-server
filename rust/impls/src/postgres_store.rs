@@ -32,8 +32,18 @@ pub(crate) struct VssDbRecord {
 }
 const KEY_COLUMN: &str = "key";
 const VALUE_COLUMN: &str = "value";
+const VALUE_SIZE_COLUMN: &str = "value_size";
 const VERSION_COLUMN: &str = "version";
 const SORT_ORDER_COLUMN: &str = "sort_order";
+const TOTAL_VALUE_BYTES_COLUMN: &str = "total_value_bytes";
+
+/// Default maximum stored value bytes allowed per user.
+pub const DEFAULT_MAX_USER_STORAGE_BYTES: i64 = 1024 * 1024 * 1024;
+
+struct MutationResult {
+	affected_rows: u64,
+	byte_delta: i64,
+}
 
 /// Page token is the `sort_order` value of the last item in the previous page,
 /// encoded as a decimal string.
@@ -140,6 +150,7 @@ where
 	<<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
 {
 	pool: SmallPool<T>,
+	max_user_storage_bytes: i64,
 }
 
 /// A postgres backend with plaintext connections to the database
@@ -224,7 +235,27 @@ impl PostgresPlaintextBackend {
 	pub async fn new(
 		postgres_endpoint: &str, default_db: &str, vss_db: &str,
 	) -> Result<Self, Error> {
-		PostgresBackend::new_internal(postgres_endpoint, default_db, vss_db, NoTls).await
+		Self::new_with_max_user_storage_bytes(
+			postgres_endpoint,
+			default_db,
+			vss_db,
+			DEFAULT_MAX_USER_STORAGE_BYTES,
+		)
+		.await
+	}
+
+	/// Constructs a [`PostgresPlaintextBackend`] with a configured per-user storage limit.
+	pub async fn new_with_max_user_storage_bytes(
+		postgres_endpoint: &str, default_db: &str, vss_db: &str, max_user_storage_bytes: i64,
+	) -> Result<Self, Error> {
+		PostgresBackend::new_internal(
+			postgres_endpoint,
+			default_db,
+			vss_db,
+			max_user_storage_bytes,
+			NoTls,
+		)
+		.await
 	}
 }
 
@@ -232,6 +263,21 @@ impl PostgresTlsBackend {
 	/// Constructs a [`PostgresTlsBackend`] using `postgres_endpoint` for PostgreSQL connection information.
 	pub async fn new(
 		postgres_endpoint: &str, default_db: &str, vss_db: &str, crt_pem: Option<&str>,
+	) -> Result<Self, Error> {
+		Self::new_with_max_user_storage_bytes(
+			postgres_endpoint,
+			default_db,
+			vss_db,
+			crt_pem,
+			DEFAULT_MAX_USER_STORAGE_BYTES,
+		)
+		.await
+	}
+
+	/// Constructs a [`PostgresTlsBackend`] with a configured per-user storage limit.
+	pub async fn new_with_max_user_storage_bytes(
+		postgres_endpoint: &str, default_db: &str, vss_db: &str, crt_pem: Option<&str>,
+		max_user_storage_bytes: i64,
 	) -> Result<Self, Error> {
 		let mut builder = TlsConnector::builder();
 		if let Some(pem) = crt_pem {
@@ -250,6 +296,7 @@ impl PostgresTlsBackend {
 			postgres_endpoint,
 			default_db,
 			vss_db,
+			max_user_storage_bytes,
 			MakeTlsConnector::new(connector),
 		)
 		.await
@@ -264,12 +311,19 @@ where
 	<<T as MakeTlsConnect<Socket>>::TlsConnect as TlsConnect<Socket>>::Future: Send,
 {
 	async fn new_internal(
-		postgres_endpoint: &str, default_db: &str, vss_db: &str, tls: T,
+		postgres_endpoint: &str, default_db: &str, vss_db: &str, max_user_storage_bytes: i64,
+		tls: T,
 	) -> Result<Self, Error> {
+		if max_user_storage_bytes < 0 {
+			return Err(Error::new(
+				ErrorKind::InvalidInput,
+				"Maximum user storage bytes cannot be negative",
+			));
+		}
 		create_database(postgres_endpoint, default_db, vss_db, tls.clone()).await?;
 
 		let pool = SmallPool::new(postgres_endpoint, vss_db, tls).await?;
-		let postgres_backend = PostgresBackend { pool };
+		let postgres_backend = PostgresBackend { pool, max_user_storage_bytes };
 
 		#[cfg(not(test))]
 		postgres_backend.migrate_vss_database(MIGRATIONS).await?;
@@ -387,15 +441,103 @@ where
 		}
 	}
 
+	fn usage_after_delta(&self, current_total: i64, byte_delta: i64) -> Result<i64, VssError> {
+		let new_total = current_total.checked_add(byte_delta).ok_or_else(|| {
+			VssError::InvalidRequestError("User storage limit exceeded".to_string())
+		})?;
+		if new_total < 0 {
+			return Err(VssError::InternalServerError(
+				"User storage usage accounting became negative".to_string(),
+			));
+		}
+		if byte_delta > 0 && new_total > self.max_user_storage_bytes {
+			return Err(VssError::InvalidRequestError(format!(
+				"User storage limit exceeded: {} bytes would exceed the configured limit of {} bytes",
+				new_total, self.max_user_storage_bytes
+			)));
+		}
+		Ok(new_total)
+	}
+
+	async fn ensure_and_lock_user_storage_usage(
+		&self, transaction: &Transaction<'_>, user_token: &str,
+	) -> io::Result<i64> {
+		let insert_stmt = "INSERT INTO vss_user_storage_usage (user_token, total_value_bytes)
+			VALUES ($1, 0)
+			ON CONFLICT (user_token) DO NOTHING";
+		let inserted_rows =
+			transaction.execute(insert_stmt, &[&user_token]).await.map_err(|e| {
+				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
+			})?;
+		if inserted_rows == 1 {
+			let backfill_stmt = "UPDATE vss_user_storage_usage
+				SET total_value_bytes = (
+					SELECT COALESCE(SUM(value_size), 0)::bigint
+					FROM vss_db
+					WHERE user_token = $1
+				)
+				WHERE user_token = $1";
+			transaction.execute(backfill_stmt, &[&user_token]).await.map_err(|e| {
+				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
+			})?;
+		}
+
+		let select_stmt = "SELECT total_value_bytes FROM vss_user_storage_usage
+			WHERE user_token = $1
+			FOR UPDATE";
+		let row = transaction.query_one(select_stmt, &[&user_token]).await.map_err(|e| {
+			Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
+		})?;
+		Ok(row.get(TOTAL_VALUE_BYTES_COLUMN))
+	}
+
+	async fn update_user_storage_usage(
+		&self, transaction: &Transaction<'_>, user_token: &str, byte_delta: i64,
+	) -> io::Result<()> {
+		if byte_delta == 0 {
+			return Ok(());
+		}
+
+		let stmt = "UPDATE vss_user_storage_usage
+			SET total_value_bytes = total_value_bytes + $2
+			WHERE user_token = $1";
+		let num_rows =
+			transaction.execute(stmt, &[&user_token, &byte_delta]).await.map_err(|e| {
+				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
+			})?;
+		if num_rows != 1 {
+			return Err(Error::new(ErrorKind::Other, "Failed to update user storage usage row"));
+		}
+		Ok(())
+	}
+
+	async fn fetch_value_size_for_update(
+		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
+	) -> io::Result<Option<i64>> {
+		let stmt = "SELECT value_size FROM vss_db
+			WHERE user_token = $1 AND store_id = $2 AND key = $3
+			FOR UPDATE";
+		let row = transaction
+			.query_opt(stmt, &[&vss_record.user_token, &vss_record.store_id, &vss_record.key])
+			.await
+			.map_err(|e| {
+				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
+			})?;
+		Ok(row.map(|row| row.get(VALUE_SIZE_COLUMN)))
+	}
+
 	async fn execute_non_conditional_upsert(
 		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
-	) -> io::Result<u64> {
+	) -> io::Result<MutationResult> {
+		let old_size =
+			self.fetch_value_size_for_update(transaction, vss_record).await?.unwrap_or(0);
 		let stmt = format!("INSERT INTO vss_db (user_token, store_id, key, value, version, created_at, last_updated_at)
                     VALUES ($1, $2, $3, $4, {}, $5, $6)
                     ON CONFLICT (user_token, store_id, key) DO UPDATE
-                    SET value = EXCLUDED.value, version = {}, last_updated_at = EXCLUDED.last_updated_at", INITIAL_RECORD_VERSION, INITIAL_RECORD_VERSION);
-		let num_rows = transaction
-			.execute(
+                    SET value = EXCLUDED.value, version = {}, last_updated_at = EXCLUDED.last_updated_at
+                    RETURNING value_size", INITIAL_RECORD_VERSION, INITIAL_RECORD_VERSION);
+		let row = transaction
+			.query_one(
 				&stmt,
 				&[
 					&vss_record.user_token,
@@ -410,17 +552,19 @@ where
 			.map_err(|e| {
 				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
 			})?;
-		Ok(num_rows)
+		let new_size: i64 = row.get(VALUE_SIZE_COLUMN);
+		Ok(MutationResult { affected_rows: 1, byte_delta: new_size - old_size })
 	}
 
 	async fn execute_conditional_insert(
 		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
-	) -> io::Result<u64> {
+	) -> io::Result<MutationResult> {
 		let stmt = format!("INSERT INTO vss_db (user_token, store_id, key, value, version, created_at, last_updated_at)
                     VALUES ($1, $2, $3, $4, {}, $5, $6)
-                    ON CONFLICT DO NOTHING", INITIAL_RECORD_VERSION);
-		let num_rows = transaction
-			.execute(
+                    ON CONFLICT DO NOTHING
+                    RETURNING value_size", INITIAL_RECORD_VERSION);
+		let row = transaction
+			.query_opt(
 				&stmt,
 				&[
 					&vss_record.user_token,
@@ -435,16 +579,24 @@ where
 			.map_err(|e| {
 				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
 			})?;
-		Ok(num_rows)
+		if let Some(row) = row {
+			let new_size: i64 = row.get(VALUE_SIZE_COLUMN);
+			Ok(MutationResult { affected_rows: 1, byte_delta: new_size })
+		} else {
+			Ok(MutationResult { affected_rows: 0, byte_delta: 0 })
+		}
 	}
 
 	async fn execute_conditional_update(
 		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
-	) -> io::Result<u64> {
+	) -> io::Result<MutationResult> {
+		let old_size =
+			self.fetch_value_size_for_update(transaction, vss_record).await?.unwrap_or(0);
 		let stmt = "UPDATE vss_db SET value = $1, version = $2, last_updated_at = $3
-                    WHERE user_token = $4 AND store_id = $5 AND key = $6 AND version = $7";
-		let num_rows = transaction
-			.execute(
+                    WHERE user_token = $4 AND store_id = $5 AND key = $6 AND version = $7
+                    RETURNING value_size";
+		let row = transaction
+			.query_opt(
 				stmt,
 				&[
 					&vss_record.value,
@@ -460,12 +612,17 @@ where
 			.map_err(|e| {
 				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
 			})?;
-		Ok(num_rows)
+		if let Some(row) = row {
+			let new_size: i64 = row.get(VALUE_SIZE_COLUMN);
+			Ok(MutationResult { affected_rows: 1, byte_delta: new_size - old_size })
+		} else {
+			Ok(MutationResult { affected_rows: 0, byte_delta: 0 })
+		}
 	}
 
 	async fn execute_put_object_query(
 		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
-	) -> io::Result<u64> {
+	) -> io::Result<MutationResult> {
 		if vss_record.version == -1 {
 			self.execute_non_conditional_upsert(transaction, vss_record).await
 		} else if vss_record.version == 0 {
@@ -477,23 +634,32 @@ where
 
 	async fn execute_non_conditional_delete(
 		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
-	) -> io::Result<u64> {
-		let stmt = "DELETE FROM vss_db WHERE user_token = $1 AND store_id = $2 AND key = $3";
-		let num_rows = transaction
-			.execute(stmt, &[&vss_record.user_token, &vss_record.store_id, &vss_record.key])
+	) -> io::Result<MutationResult> {
+		let stmt = "DELETE FROM vss_db
+			WHERE user_token = $1 AND store_id = $2 AND key = $3
+			RETURNING value_size";
+		let row = transaction
+			.query_opt(stmt, &[&vss_record.user_token, &vss_record.store_id, &vss_record.key])
 			.await
 			.map_err(|e| {
 				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
 			})?;
-		Ok(num_rows)
+		if let Some(row) = row {
+			let old_size: i64 = row.get(VALUE_SIZE_COLUMN);
+			Ok(MutationResult { affected_rows: 1, byte_delta: -old_size })
+		} else {
+			Ok(MutationResult { affected_rows: 0, byte_delta: 0 })
+		}
 	}
 
 	async fn execute_conditional_delete(
 		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
-	) -> io::Result<u64> {
-		let stmt = "DELETE FROM vss_db WHERE user_token = $1 AND store_id = $2 AND key = $3 AND version = $4";
-		let num_rows = transaction
-			.execute(
+	) -> io::Result<MutationResult> {
+		let stmt = "DELETE FROM vss_db
+			WHERE user_token = $1 AND store_id = $2 AND key = $3 AND version = $4
+			RETURNING value_size";
+		let row = transaction
+			.query_opt(
 				stmt,
 				&[
 					&vss_record.user_token,
@@ -506,12 +672,17 @@ where
 			.map_err(|e| {
 				Error::new(ErrorKind::Other, format!("Database operation failed. {}", e))
 			})?;
-		Ok(num_rows)
+		if let Some(row) = row {
+			let old_size: i64 = row.get(VALUE_SIZE_COLUMN);
+			Ok(MutationResult { affected_rows: 1, byte_delta: -old_size })
+		} else {
+			Ok(MutationResult { affected_rows: 0, byte_delta: 0 })
+		}
 	}
 
 	async fn execute_delete_object_query(
 		&self, transaction: &Transaction<'_>, vss_record: &VssDbRecord,
-	) -> io::Result<u64> {
+	) -> io::Result<MutationResult> {
 		if vss_record.version == -1 {
 			self.execute_non_conditional_delete(transaction, vss_record).await
 		} else {
@@ -577,7 +748,7 @@ where
 
 		if let Some(global_version) = request.global_version {
 			let global_version_record = self.build_vss_record(
-				user_token,
+				user_token.to_string(),
 				store_id,
 				KeyValue {
 					key: GLOBAL_VERSION_KEY.to_string(),
@@ -594,20 +765,29 @@ where
 			.await
 			.map_err(|e| Error::new(ErrorKind::Other, format!("Transaction start error: {}", e)))?;
 
+		let current_total =
+			self.ensure_and_lock_user_storage_usage(&transaction, &user_token).await?;
 		let mut batch_results = Vec::new();
+		let mut total_delta = 0i64;
 
 		for vss_record in &vss_put_records {
-			let num_rows = self.execute_put_object_query(&transaction, vss_record).await?;
-			batch_results.push(num_rows);
+			let result = self.execute_put_object_query(&transaction, vss_record).await?;
+			total_delta = total_delta.checked_add(result.byte_delta).ok_or_else(|| {
+				VssError::InvalidRequestError("User storage limit exceeded".to_string())
+			})?;
+			batch_results.push(result);
 		}
 
 		for vss_record in &vss_delete_records {
-			let num_rows = self.execute_delete_object_query(&transaction, vss_record).await?;
-			batch_results.push(num_rows);
+			let result = self.execute_delete_object_query(&transaction, vss_record).await?;
+			total_delta = total_delta.checked_add(result.byte_delta).ok_or_else(|| {
+				VssError::InvalidRequestError("User storage limit exceeded".to_string())
+			})?;
+			batch_results.push(result);
 		}
 
-		for num_rows in batch_results {
-			if num_rows == 0 {
+		for result in batch_results {
+			if result.affected_rows == 0 {
 				transaction.rollback().await.map_err(|e| {
 					Error::new(ErrorKind::Other, format!("Transaction rollback error: {}", e))
 				})?;
@@ -616,6 +796,15 @@ where
 				));
 			}
 		}
+
+		if let Err(e) = self.usage_after_delta(current_total, total_delta) {
+			transaction.rollback().await.map_err(|e| {
+				Error::new(ErrorKind::Other, format!("Transaction rollback error: {}", e))
+			})?;
+			return Err(e);
+		}
+
+		self.update_user_storage_usage(&transaction, &user_token, total_delta).await?;
 
 		transaction.commit().await.map_err(|e| {
 			Error::new(ErrorKind::Other, format!("Transaction commit error: {}", e))
@@ -638,14 +827,25 @@ where
 			.await
 			.map_err(|e| Error::new(ErrorKind::Other, format!("Transaction start error: {}", e)))?;
 
-		let num_rows = self.execute_delete_object_query(&transaction, &vss_record).await?;
+		let current_total =
+			self.ensure_and_lock_user_storage_usage(&transaction, &vss_record.user_token).await?;
+		let result = self.execute_delete_object_query(&transaction, &vss_record).await?;
 
-		if num_rows == 0 {
+		if result.affected_rows == 0 {
 			transaction.rollback().await.map_err(|e| {
 				Error::new(ErrorKind::Other, format!("Transaction rollback error: {}", e))
 			})?;
 			return Ok(DeleteObjectResponse {});
 		}
+
+		if let Err(e) = self.usage_after_delta(current_total, result.byte_delta) {
+			transaction.rollback().await.map_err(|e| {
+				Error::new(ErrorKind::Other, format!("Transaction rollback error: {}", e))
+			})?;
+			return Err(e);
+		}
+		self.update_user_storage_usage(&transaction, &vss_record.user_token, result.byte_delta)
+			.await?;
 
 		transaction.commit().await.map_err(|e| {
 			Error::new(ErrorKind::Other, format!("Transaction commit error: {}", e))
