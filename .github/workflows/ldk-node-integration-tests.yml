@@ -41,12 +41,21 @@ jobs:
         with:
           repository: lightningdevkit/ldk-node
           path: ldk-node
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal
+          rustup default ${{ matrix.toolchain }}
 
       - name: Build and Deploy VSS Server
         run: |
           cd vss-server/rust
           RUSTFLAGS="--cfg noop_authorizer" cargo build --no-default-features
           ./target/debug/vss-server server/vss-server-config.toml&
+      - name: Pin packages to allow for MSRV
+        if: "matrix.toolchain == '1.85.0'"
+        run: |
+          cd ldk-node
+          cargo update -p idna_adapter --precise "1.2.0" --verbose # idna_adapter 1.2.1 uses ICU4X 2.2.0, requiring 1.86 and newer
       - name: Run LDK Node Integration tests
         run: |
           cd ldk-node

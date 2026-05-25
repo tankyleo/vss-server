@@ -34,8 +34,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt
+          rustup default ${{ matrix.toolchain }}
       - name: Check formatting
-        run: rustup component add rustfmt && cd rust && cargo fmt --all -- --check
+        run: cd rust && cargo fmt --all -- --check
       - name: Build and Deploy VSS Server
         run: |
           cd rust
