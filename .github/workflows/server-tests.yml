@@ -1,0 +1,46 @@
+name: Server Tests
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ ubuntu-latest ]
+        toolchain: [ stable, 1.85.0 ] # 1.85.0 is the MSRV
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:latest
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Build and Deploy VSS Server
+        run: |
+          cd rust
+          RUSTFLAGS="--cfg noop_authorizer" cargo build --no-default-features
+          ./target/debug/vss-server server/vss-server-config.toml&
+      - name: Run the server tests
+        run: |
+          sleep 5
+          cd rust/server
+          RUSTFLAGS="--cfg vss_client_v050_compatibility" cargo test

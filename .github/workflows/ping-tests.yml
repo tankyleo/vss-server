@@ -1,4 +1,4 @@
-name: Ping Check
+name: Ping Tests
 
 on: [push, pull_request]
 
@@ -7,13 +7,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ping-check:
+  ping-tests:
     strategy:
       fail-fast: false
       matrix:
         platform: [ ubuntu-latest ]
         toolchain: [ stable, 1.85.0 ] # 1.85.0 is the MSRV
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 15
 
     services:
       postgres:
