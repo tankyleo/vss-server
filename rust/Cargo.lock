@@ -1764,6 +1764,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "vss-client-ng"
+version = "0.6.0"
+source = "git+https://github.com/lightningdevkit/vss-client.git?branch=main#88cfcc11d5a460d7bae57b56ae9211d33979533f"
+dependencies = [
+ "async-trait",
+ "base64",
+ "bitcoin",
+ "bitcoin_hashes 0.14.1",
+ "bitreq",
+ "chacha20-poly1305",
+ "log",
+ "prost",
+ "prost-build",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "vss-server"
 version = "0.1.0"
 dependencies = [
@@ -1781,7 +1801,8 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
- "vss-client-ng",
+ "vss-client-ng 0.5.0",
+ "vss-client-ng 0.6.0",
 ]
 
 [[package]]

@@ -1,21 +1,25 @@
-//! Compatibility shakedown for the pinned vss-client-ng v0.5.0 dependency against current
-//! vss-server master. This test assumes a no-auth VSS server is already running at
-//! `localhost:8080` and exercises a full client lifecycle through the public v0.5.0 client API:
-//! empty listing, missing-key reads, conditional and non-conditional writes, gets, conflict
-//! handling, transactional put/delete, direct deletes, paginated listing, and cleanup.
+//! Compatibility shakedown for vss-client-ng dependencies against current vss-server master. This
+//! test assumes a no-auth VSS server is already running at `localhost:8080` and exercises a full
+//! client lifecycle through the public client API: empty listing, missing-key reads, conditional
+//! and non-conditional writes, gets, conflict handling, transactional put/delete, direct deletes,
+//! paginated listing, and cleanup.
 
-#![cfg(vss_client_v050_compatibility)]
+#![cfg(any(vss_client_v050_compatibility, vss_client_main_compatibility))]
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use vss_client_v050::client::VssClient;
-use vss_client_v050::error::VssError;
-use vss_client_v050::types::{
+#[cfg(vss_client_main_compatibility)]
+use vss_client_main as vss_client;
+#[cfg(vss_client_v050_compatibility)]
+use vss_client_v050 as vss_client;
+
+use vss_client::client::VssClient;
+use vss_client::error::VssError;
+use vss_client::types::{
 	DeleteObjectRequest, GetObjectRequest, GetObjectResponse, KeyValue, ListKeyVersionsRequest,
 	PutObjectRequest,
 };
-use vss_client_v050::util::retry::{ExponentialBackoffRetryPolicy, RetryPolicy};
+use vss_client::util::retry::{ExponentialBackoffRetryPolicy, RetryPolicy};
 
 const VSS_SERVER_BASE_URL: &str = "http://localhost:8080/vss";
 const KEY_ALPHA: &str = "compat/alpha";
@@ -31,7 +35,7 @@ const GLOBAL_VERSION_KEY: &str = "global_version";
 const LIST_PAGE_SIZE: i32 = 2;
 
 #[tokio::test]
-async fn test_vss_client_v050_compatibility() -> Result<(), VssError> {
+async fn test_vss_client_compatibility() -> Result<(), VssError> {
 	let client = VssClient::new(VSS_SERVER_BASE_URL.to_string(), retry_policy());
 	let store_id = unique_store_id();
 	let mut global_version = 0;
@@ -162,17 +166,32 @@ async fn test_vss_client_v050_compatibility() -> Result<(), VssError> {
 
 	let listed_versions =
 		list_all_key_versions(&client, &store_id, Some(KEY_PREFIX), global_version).await?;
-	let listed_keys: BTreeSet<&str> = listed_versions.keys().map(String::as_str).collect();
-	// Prefix listing should include only the live keys under compat/ after deletes and conflicts.
-	assert_eq!(listed_keys, BTreeSet::from([KEY_ALPHA, KEY_DELTA, KEY_EPSILON, KEY_THETA]));
+	let listed_keys: Vec<&str> =
+		listed_versions.iter().map(|(k, _v)| k).map(String::as_str).collect();
+	// Prefix listing should include only the live keys under compat/ after deletes and conflicts, and
+	// in creation order. vss-client-v050 does not require creation-time ordering, but it is within
+	// its API contract. vss-client-v060 and onwards require creation-time ordering.
+	assert_eq!(listed_keys, [KEY_EPSILON, KEY_THETA, KEY_DELTA, KEY_ALPHA]);
 	// Listing should report alpha's latest key version.
-	assert_eq!(listed_versions[KEY_ALPHA], 2);
+	assert_eq!(
+		listed_versions.iter().find_map(|(k, v)| (k == KEY_ALPHA).then_some(*v)).unwrap(),
+		2
+	);
 	// Listing should report delta's non-conditional write version.
-	assert_eq!(listed_versions[KEY_DELTA], 1);
+	assert_eq!(
+		listed_versions.iter().find_map(|(k, v)| (k == KEY_DELTA).then_some(*v)).unwrap(),
+		1
+	);
 	// Listing should report epsilon's no-global-version write version.
-	assert_eq!(listed_versions[KEY_EPSILON], 1);
+	assert_eq!(
+		listed_versions.iter().find_map(|(k, v)| (k == KEY_EPSILON).then_some(*v)).unwrap(),
+		1
+	);
 	// Listing should report theta's transactional write version.
-	assert_eq!(listed_versions[KEY_THETA], 1);
+	assert_eq!(
+		listed_versions.iter().find_map(|(k, v)| (k == KEY_THETA).then_some(*v)).unwrap(),
+		1
+	);
 
 	let cleanup_keys =
 		[KEY_ALPHA, KEY_DELTA, KEY_EPSILON, KEY_THETA, KEY_OUTSIDE_PREFIX, GLOBAL_VERSION_KEY];
@@ -201,7 +220,7 @@ fn unique_store_id() -> String {
 		.duration_since(UNIX_EPOCH)
 		.expect("system clock must be after UNIX epoch")
 		.as_nanos();
-	format!("v050-compat-{nanos}")
+	format!("vss-client-compat-{nanos}")
 }
 
 fn get_request(store_id: &str, key: &str) -> GetObjectRequest {
@@ -249,7 +268,7 @@ async fn assert_key_value(
 	assert_eq!(value.key, key);
 	// The key-level version must match the lifecycle step's expected version.
 	assert_eq!(value.version, expected_version);
-	// The stored bytes must round-trip unchanged through the v0.5.0 client.
+	// The stored bytes must round-trip unchanged through the client.
 	assert_eq!(value.value, expected_value);
 	Ok(())
 }
@@ -284,9 +303,9 @@ fn assert_conflict<T>(result: Result<T, VssError>) {
 async fn list_all_key_versions(
 	client: &VssClient<impl RetryPolicy<E = VssError>>, store_id: &str, key_prefix: Option<&str>,
 	expected_global_version: i64,
-) -> Result<BTreeMap<String, i64>, VssError> {
+) -> Result<Vec<(String, i64)>, VssError> {
 	let mut page_token = None;
-	let mut key_versions = BTreeMap::new();
+	let mut key_versions = Vec::new();
 	let mut page_count = 0;
 
 	loop {
@@ -313,7 +332,7 @@ async fn list_all_key_versions(
 		for key_value in page.key_versions {
 			// List responses should include only key/version metadata, not stored values.
 			assert!(key_value.value.is_empty());
-			key_versions.insert(key_value.key, key_value.version);
+			key_versions.push((key_value.key, key_value.version));
 		}
 
 		match page.next_page_token {

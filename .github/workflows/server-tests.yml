@@ -48,3 +48,5 @@ jobs:
           sleep 5
           cd rust/server
           RUSTFLAGS="--cfg vss_client_v050_compatibility" cargo test
+          cargo update -p vss-client-ng@0.6.0 --verbose
+          RUSTFLAGS="--cfg vss_client_main_compatibility" cargo test

@@ -32,5 +32,8 @@ api = { path = "../api", features = ["_test_utils"] }
 [target.'cfg(vss_client_v050_compatibility)'.dev-dependencies]
 vss-client-v050 = { package = "vss-client-ng", version = "=0.5.0" }
 
+[target.'cfg(vss_client_main_compatibility)'.dev-dependencies]
+vss-client-main = { package = "vss-client-ng", git = "https://github.com/lightningdevkit/vss-client.git", branch = "main" }
+
 [lints]
 workspace = true
