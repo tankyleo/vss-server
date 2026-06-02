@@ -1,4 +1,4 @@
-name: Ping Check
+name: Ping Tests
 
 on: [push, pull_request]
 
@@ -7,13 +7,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ping-check:
+  ping-tests:
     strategy:
       fail-fast: false
       matrix:
         platform: [ ubuntu-latest ]
         toolchain: [ stable, 1.85.0 ] # 1.85.0 is the MSRV
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -33,8 +34,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt
+          rustup default ${{ matrix.toolchain }}
       - name: Check formatting
-        run: rustup component add rustfmt && cd rust && cargo fmt --all -- --check
+        run: cd rust && cargo fmt --all -- --check
       - name: Build and Deploy VSS Server
         run: |
           cd rust

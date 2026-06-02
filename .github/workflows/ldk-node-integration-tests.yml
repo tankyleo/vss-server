@@ -1,0 +1,64 @@
+name: LDK Node Integration Tests
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ldk-node-integration-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ ubuntu-latest ]
+        toolchain: [ stable, 1.85.0 ] # 1.85.0 is the MSRV
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+
+    services:
+      postgres:
+        image: postgres:latest
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          path: vss-server
+      - name: Checkout LDK Node
+        uses: actions/checkout@v3
+        with:
+          repository: lightningdevkit/ldk-node
+          path: ldk-node
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal
+          rustup default ${{ matrix.toolchain }}
+
+      - name: Build and Deploy VSS Server
+        run: |
+          cd vss-server/rust
+          RUSTFLAGS="--cfg noop_authorizer" cargo build --no-default-features
+          ./target/debug/vss-server server/vss-server-config.toml&
+      - name: Pin packages to allow for MSRV
+        if: "matrix.toolchain == '1.85.0'"
+        run: |
+          cd ldk-node
+          cargo update -p idna_adapter --precise "1.2.0" --verbose # idna_adapter 1.2.1 uses ICU4X 2.2.0, requiring 1.86 and newer
+      - name: Run LDK Node Integration tests
+        run: |
+          cd ldk-node
+          export TEST_VSS_BASE_URL="http://localhost:8080/vss"
+          RUSTFLAGS="--cfg vss_test" cargo test io::vss_store -- --test-threads=1
+          RUSTFLAGS="--cfg vss_test" cargo test --test integration_tests_vss -- --test-threads=1

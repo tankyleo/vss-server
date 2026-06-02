@@ -1,4 +1,4 @@
-name: LDK Node Integration Tests
+name: Server Tests
 
 on: [push, pull_request]
 
@@ -7,14 +7,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  server-tests:
     strategy:
       fail-fast: false
       matrix:
         platform: [ ubuntu-latest ]
         toolchain: [ stable, 1.85.0 ] # 1.85.0 is the MSRV
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 60
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -34,22 +34,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          path: vss-server
-      - name: Checkout LDK Node
-        uses: actions/checkout@v3
-        with:
-          repository: lightningdevkit/ldk-node
-          path: ldk-node
-
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal
+          rustup default ${{ matrix.toolchain }}
       - name: Build and Deploy VSS Server
         run: |
-          cd vss-server/rust
+          cd rust
           RUSTFLAGS="--cfg noop_authorizer" cargo build --no-default-features
           ./target/debug/vss-server server/vss-server-config.toml&
-      - name: Run LDK Node Integration tests
+      - name: Run the server tests
         run: |
-          cd ldk-node
-          export TEST_VSS_BASE_URL="http://localhost:8080/vss"
-          RUSTFLAGS="--cfg vss_test" cargo test io::vss_store -- --test-threads=1
-          RUSTFLAGS="--cfg vss_test" cargo test --test integration_tests_vss -- --test-threads=1
+          sleep 5
+          cd rust/server
+          RUSTFLAGS="--cfg vss_client_v050_compatibility" cargo test
+          cargo update -p vss-client-ng@0.6.0 --verbose
+          RUSTFLAGS="--cfg vss_client_main_compatibility" cargo test
