@@ -1,7 +1,5 @@
 # Versioned Storage Service (Rust)
 
-This directory hosts the Rust-based implementation of the Versioned Storage Service (VSS).
-
 ### Prerequisites
 
 - Install Rust and Cargo (https://www.rust-lang.org/tools/install).
@@ -12,7 +10,7 @@ This directory hosts the Rust-based implementation of the Versioned Storage Serv
 
 ```
 git clone https://github.com/lightningdevkit/vss-server.git
-cd vss-server/rust
+cd vss-server
 
 cargo build --release
 ```

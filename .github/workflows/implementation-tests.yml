@@ -43,5 +43,5 @@ jobs:
 
       - name: Run postgres backend test suite
         run: |
-          cd vss-server/rust/impls
+          cd vss-server/impls
           cargo test -- --test-threads=1

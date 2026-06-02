@@ -12,7 +12,7 @@ fn main() {
 #[cfg(genproto)]
 fn generate_protos() {
 	fs::create_dir_all("src/proto").unwrap();
-	fs::copy("../../proto/vss.proto", "src/proto/vss.proto").unwrap();
+	fs::copy("../proto/vss.proto", "src/proto/vss.proto").unwrap();
 
 	prost_build::Config::new()
 		.bytes(&["."])

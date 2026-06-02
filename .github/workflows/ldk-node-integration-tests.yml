@@ -48,7 +48,7 @@ jobs:
 
       - name: Build and Deploy VSS Server
         run: |
-          cd vss-server/rust
+          cd vss-server
           RUSTFLAGS="--cfg noop_authorizer" cargo build --no-default-features
           ./target/debug/vss-server server/vss-server-config.toml&
       - name: Pin packages to allow for MSRV
