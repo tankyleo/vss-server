@@ -67,7 +67,7 @@ dependencies = [
  "api",
  "async-trait",
  "base64",
- "bitcoin_hashes 0.19.0",
+ "bitcoin_hashes 1.0.0",
  "hex-conservative 1.0.1",
  "jsonwebtoken",
  "openssl",
@@ -91,9 +91,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bitcoin-consensus-encoding"
-version = "1.0.0-rc.3"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cd69023e5db2f3f7241672de6be29408373ba0ff407e7fda71d70d728bec05a"
+checksum = "b2d6094e2a1ba3c93b5a596fe5a10d1a10c3c6e06785cde89f693a044c01aa40"
 dependencies = [
  "bitcoin-internals",
 ]
@@ -122,9 +122,9 @@ dependencies = [
 
 [[package]]
 name = "bitcoin_hashes"
-version = "0.19.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9aaf7add9aa250546d4d7a0ad0755a25327f5205dc2d7eba6b6ec08cd864c79e"
+checksum = "8f70c29ac06e7effa19682e91318deae86bdb46c4fd1bbd0f12fd196ff427ab0"
 dependencies = [
  "bitcoin-consensus-encoding",
  "bitcoin-internals",
