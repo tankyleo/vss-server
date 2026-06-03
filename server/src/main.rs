@@ -87,7 +87,10 @@ fn main() {
 			},
 		};
 
+		#[cfg(any(feature = "jwt", feature = "sigs"))]
 		let mut authorizer: Option<Arc<dyn Authorizer>> = None;
+		#[cfg(not(any(feature = "jwt", feature = "sigs")))]
+		let authorizer: Option<Arc<dyn Authorizer>> = None;
 		#[cfg(feature = "jwt")]
 		{
 			if let Some(rsa_pem) = config.rsa_pem {

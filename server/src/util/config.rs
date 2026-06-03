@@ -6,6 +6,7 @@ const BIND_ADDR_VAR: &str = "VSS_BIND_ADDRESS";
 const MAX_REQUEST_BODY_SIZE_VAR: &str = "VSS_MAX_REQUEST_BODY_SIZE";
 const LOG_FILE_VAR: &str = "VSS_LOG_FILE";
 const LOG_LEVEL_VAR: &str = "VSS_LOG_LEVEL";
+#[cfg(feature = "jwt")]
 const JWT_RSA_PEM_VAR: &str = "VSS_JWT_RSA_PEM";
 const PSQL_USER_VAR: &str = "VSS_PSQL_USERNAME";
 const PSQL_PASS_VAR: &str = "VSS_PSQL_PASSWORD";
@@ -21,6 +22,7 @@ const PSQL_CERT_PEM_VAR: &str = "VSS_PSQL_CRT_PEM";
 struct TomlConfig {
 	server_config: Option<ServerConfig>,
 	log_config: Option<LogConfig>,
+	#[cfg(feature = "jwt")]
 	jwt_auth_config: Option<JwtAuthConfig>,
 	postgresql_config: Option<PostgreSQLConfig>,
 }
@@ -31,6 +33,7 @@ struct ServerConfig {
 	max_request_body_size: Option<usize>,
 }
 
+#[cfg(feature = "jwt")]
 #[derive(Deserialize)]
 struct JwtAuthConfig {
 	rsa_pem: Option<String>,
@@ -61,6 +64,7 @@ struct LogConfig {
 pub(crate) struct Configuration {
 	pub(crate) bind_address: String,
 	pub(crate) max_request_body_size: Option<usize>,
+	#[cfg(feature = "jwt")]
 	pub(crate) rsa_pem: Option<String>,
 	pub(crate) postgresql_prefix: String,
 	pub(crate) default_db: String,
@@ -90,16 +94,21 @@ fn read_config<'a, T: std::fmt::Display>(
 }
 
 pub(crate) fn load_configuration(config_file_path: Option<&str>) -> Result<Configuration, String> {
-	let TomlConfig { server_config, log_config, jwt_auth_config, postgresql_config } =
-		match config_file_path {
-			Some(path) => {
-				let config_file = std::fs::read_to_string(path)
-					.map_err(|e| format!("Failed to read configuration file: {}", e))?;
-				toml::from_str(&config_file)
-					.map_err(|e| format!("Failed to parse configuration file: {}", e))?
-			},
-			None => TomlConfig::default(), // All fields are set to `None`
-		};
+	let TomlConfig {
+		server_config,
+		log_config,
+		#[cfg(feature = "jwt")]
+		jwt_auth_config,
+		postgresql_config,
+	} = match config_file_path {
+		Some(path) => {
+			let config_file = std::fs::read_to_string(path)
+				.map_err(|e| format!("Failed to read configuration file: {}", e))?;
+			toml::from_str(&config_file)
+				.map_err(|e| format!("Failed to parse configuration file: {}", e))?
+		},
+		None => TomlConfig::default(), // All fields are set to `None`
+	};
 
 	let (bind_address_config, max_request_body_size_config) = match server_config {
 		Some(c) => (c.bind_address, c.max_request_body_size),
@@ -151,8 +160,11 @@ pub(crate) fn load_configuration(config_file_path: Option<&str>) -> Result<Confi
 	let log_file_config: Option<PathBuf> = log_config.and_then(|config| config.file);
 	let log_file = log_file_env.or(log_file_config).unwrap_or(PathBuf::from("vss.log"));
 
-	let rsa_pem_env = read_env(JWT_RSA_PEM_VAR)?;
-	let rsa_pem = rsa_pem_env.or(jwt_auth_config.and_then(|config| config.rsa_pem));
+	#[cfg(feature = "jwt")]
+	let rsa_pem = {
+		let rsa_pem_env = read_env(JWT_RSA_PEM_VAR)?;
+		rsa_pem_env.or(jwt_auth_config.and_then(|config| config.rsa_pem))
+	};
 
 	let username_env = read_env(PSQL_USER_VAR)?;
 	let password_env = read_env(PSQL_PASS_VAR)?;
@@ -206,6 +218,7 @@ pub(crate) fn load_configuration(config_file_path: Option<&str>) -> Result<Confi
 		max_request_body_size,
 		log_file,
 		log_level,
+		#[cfg(feature = "jwt")]
 		rsa_pem,
 		postgresql_prefix,
 		default_db,
