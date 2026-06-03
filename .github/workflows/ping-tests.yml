@@ -39,10 +39,9 @@ jobs:
           rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt
           rustup default ${{ matrix.toolchain }}
       - name: Check formatting
-        run: cd rust && cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
       - name: Build and Deploy VSS Server
         run: |
-          cd rust
           RUSTFLAGS="--cfg noop_authorizer" cargo build --no-default-features
           ./target/debug/vss-server server/vss-server-config.toml&
 

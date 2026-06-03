@@ -40,13 +40,12 @@ jobs:
           rustup default ${{ matrix.toolchain }}
       - name: Build and Deploy VSS Server
         run: |
-          cd rust
           RUSTFLAGS="--cfg noop_authorizer" cargo build --no-default-features
           ./target/debug/vss-server server/vss-server-config.toml&
       - name: Run the server tests
         run: |
           sleep 5
-          cd rust/server
+          cd server
           RUSTFLAGS="--cfg vss_client_v050_compatibility" cargo test
           cargo update -p vss-client-ng@0.6.0 --verbose
           RUSTFLAGS="--cfg vss_client_main_compatibility" cargo test

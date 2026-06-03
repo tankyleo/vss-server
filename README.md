@@ -64,13 +64,14 @@ See the [VSS API contract] for details.
 ### Implementation
 
 VSS has a Rust-based implementation and is ready to use.
-[VSS-rust-client] is a Rust-based client with support for client-side encryption, key obfuscation, retry mechanisms, and
+[VSS-client] is a Rust-based client with support for client-side encryption, key obfuscation, retry mechanisms, and
 LNURL-auth.
 VSS is also integrated with [LDK-node] v0.4.x as alpha support.
 
 ### Development
 
-* **Build & Deploy**: Refer to language-specific folder for instructions related to building and deploying VSS.
+* **Build & Deploy**: Refer to [docs/getting-started.md](docs/getting-started.md) for instructions related to
+  building and deploying VSS.
 * **Hosting**: VSS can either be self-hosted or deployed in the cloud. If a service provider is hosting VSS for multiple
   users, it must be configured with **HTTPS**, **Authentication/Authorization**, and **rate-limiting**.
 * **Authentication and Authorization**: VSS supports authentication via
@@ -80,7 +81,7 @@ VSS is also integrated with [LDK-node] v0.4.x as alpha support.
 * **Scaling**: VSS itself is stateless and can be horizontally scaled easily. VSS can be configured to point to a
   PostgreSQL cluster, and further scaling considerations need to be addressed in the PostgreSQL cluster.
 * **Using with LDK-node**: [LDK-node] can be easily configured to run with VSS as primary storage. It is integrated in
-  LDK-node (written in Rust) using [VSS-rust-client], and there is also support for other languages such as Swift,
+  LDK-node (written in Rust) using [VSS-client], and there is also support for other languages such as Swift,
   Kotlin and Python through [UniFFI] bindings.
     ```rust
     use ldk_node::Builder;
@@ -93,7 +94,7 @@ VSS is also integrated with [LDK-node] v0.4.x as alpha support.
     }
     ```
 * **Using with Other Applications**: VSS is designed to store application-related metadata. Clients can use
-  the [VSS-rust-client] directly for this purpose. This can help provide a complete user data recovery solution for
+  the [VSS-client] directly for this purpose. This can help provide a complete user data recovery solution for
   applications, as well as enable turn-key multi-device support in the future.
 
 ### Authentication
@@ -126,7 +127,7 @@ development of VSS, you can reach out to us in the [LDK Discord] in the `#vss` c
 
 [VSS API contract]: https://github.com/lightningdevkit/vss-server/blob/main/proto/vss.proto
 
-[VSS-rust-client]: https://github.com/lightningdevkit/vss-rust-client
+[VSS-client]: https://github.com/lightningdevkit/vss-client
 
 [LDK-node]: https://github.com/lightningdevkit/ldk-node
 
