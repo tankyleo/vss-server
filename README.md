@@ -70,12 +70,12 @@ VSS is also integrated with [LDK-node] v0.4.x as alpha support.
 
 ### Development
 
-* **Build & Deploy**: Refer to [docs/getting-started.md](docs/getting-started.md) for instructions related to
-  building and deploying VSS.
+* **Build & Deploy**: Refer to [docs/getting-started.md](docs/getting-started.md) for concrete PostgreSQL setup,
+  authentication configuration, local no-auth development mode, and deployment commands.
 * **Hosting**: VSS can either be self-hosted or deployed in the cloud. If a service provider is hosting VSS for multiple
   users, it must be configured with **HTTPS**, **Authentication/Authorization**, and **rate-limiting**.
 * **Authentication and Authorization**: VSS supports authentication via
-  [Proof-of-Private-Key-Knowledge](#Authentication) or [JWT](https://datatracker.ietf.org/doc/html/rfc7519).
+  [Proof-of-Private-Key-Knowledge](#authentication) or [JWT](https://datatracker.ietf.org/doc/html/rfc7519).
   The API also offers hooks for simple HTTP header-based authentication. Note that the security of authentication
   heavily relies on using HTTPS for all requests.
 * **Scaling**: VSS itself is stateless and can be horizontally scaled easily. VSS can be configured to point to a
@@ -99,18 +99,19 @@ VSS is also integrated with [LDK-node] v0.4.x as alpha support.
 
 ### Authentication
 
-By default, VSS uses a simple authentication scheme whereby each client must provide a valid signature for a
-client-specified public key. The public key identifies the storage that belongs to the client. This scheme does
-not impose **any** restrictions on who can interact with VSS; it **only** ensures that each client can only
-access *their own* storage. Therefore, this scheme **must** be paired with a network-level gatekeeper to prevent
-unauthorized interactions with VSS.
+Default builds include signature and JWT authentication. If `jwt_auth_config.rsa_pem` or `VSS_JWT_RSA_PEM` is
+configured, VSS verifies RS256 bearer tokens from the HTTP `Authorization` header. The JWT `sub` claim identifies
+the storage user. VSS only implements token verification; operators must provide their own token issuance service.
 
-The other option offered is JWT authentication. This form of authentication validates whether a client should
-be given access to VSS, *and* which storage the client has access to. VSS only implements the verification half of this
-scheme, and users must provide their own JWT issuance service if this solution is chosen.
+If JWT is not configured, VSS uses signature authentication. Each client provides a valid signature for a
+client-specified secp256k1 public key in the HTTP `Authorization` header. The public key identifies that client's
+storage. This scheme does not impose **any** restrictions on who can interact with VSS; it **only** ensures that each
+client can only access *their own* storage. Therefore, this scheme **must** be paired with a network-level gatekeeper
+and rate limiting to prevent unauthorized interactions with VSS.
 
-Finally, there is an option to completely disable all forms of authentication to VSS. This option should *only* be
-used in local development and testing.
+Finally, there is a cfg-gated option to disable all forms of authentication for local development and testing. Do not
+publicly expose no-auth builds. See [docs/getting-started.md](docs/getting-started.md#authentication-setup) for exact
+config and build commands.
 
 ### Summary
 
