@@ -126,7 +126,7 @@ If you encounter any issues or have questions, feel free to open an issue on
 the [GitHub repository](https://github.com/lightningdevkit/vss-server/issues). For further assistance or to discuss the
 development of VSS, you can reach out to us in the [LDK Discord] in the `#vss` channel.
 
-[VSS API contract]: https://github.com/lightningdevkit/vss-server/blob/main/proto/vss.proto
+[VSS API contract]: https://github.com/lightningdevkit/vss-server/blob/main/api/src/proto/vss.proto
 
 [VSS-client]: https://github.com/lightningdevkit/vss-client
 
