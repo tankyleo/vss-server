@@ -31,7 +31,7 @@ pub const SIGNING_CONSTANT: &'static [u8] =
 /// 64-byte secp256k1 ECDSA signature followed by the signing time since the UNIX epoch, encoded as
 /// a string.
 ///
-/// The proof will not be valid if the provided time is more than an hour from now.
+/// The proof will not be valid if the provided time is more than 24 hours from now.
 ///
 /// Because no rate-limiting of new user accounts is done, a higher-level service is required to
 /// ensure requests are not triggering excess new user registrations.
