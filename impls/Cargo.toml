@@ -4,6 +4,7 @@ description = "Backend KV store implementations for VSS."
 version.workspace = true
 rust-version.workspace = true
 edition.workspace = true
+authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
