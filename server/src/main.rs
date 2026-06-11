@@ -87,7 +87,10 @@ fn main() {
 			},
 		};
 
+		#[cfg(any(feature = "jwt", feature = "sigs"))]
 		let mut authorizer: Option<Arc<dyn Authorizer>> = None;
+		#[cfg(not(any(feature = "jwt", feature = "sigs")))]
+		let authorizer: Option<Arc<dyn Authorizer>> = None;
 		#[cfg(feature = "jwt")]
 		{
 			if let Some(rsa_pem) = config.rsa_pem {
@@ -137,10 +140,7 @@ fn main() {
 				error!("Failed to start postgres TLS backend: {}", e);
 				std::process::exit(-1);
 			});
-			info!(
-				"Connected to PostgreSQL TLS backend with DSN: {}/{}",
-				config.postgresql_prefix, config.vss_db
-			);
+			info!("Connected to PostgreSQL TLS backend, database {}", config.vss_db);
 			Arc::new(postgres_tls_backend)
 		} else {
 			let postgres_plaintext_backend = PostgresPlaintextBackend::new(
@@ -153,10 +153,7 @@ fn main() {
 				error!("Failed to start postgres plaintext backend: {}", e);
 				std::process::exit(-1);
 			});
-			info!(
-				"Connected to PostgreSQL plaintext backend with DSN: {}/{}",
-				config.postgresql_prefix, config.vss_db
-			);
+			info!("Connected to PostgreSQL plaintext backend, database {}", config.vss_db);
 			Arc::new(postgres_plaintext_backend)
 		};
 

@@ -1,8 +1,12 @@
 [package]
-name = "api"
-version = "0.1.0"
-edition = "2021"
+name = "vss-api"
+description = "API contracts for VSS."
+version.workspace = true
 rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 async-trait = "0.1.77"
